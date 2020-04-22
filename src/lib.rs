@@ -163,7 +163,127 @@ impl Fumen {
     }
 
     pub fn decode(data: &str) -> Option<Fumen> {
-        unimplemented!()
+        if &data[..5] != "v115@" {
+            return None;
+        }
+        let mut iter = data[5..].chars().map(from_base64).peekable();
+        let mut fumen = Fumen::default();
+        let mut empty_fields = 0;
+        while iter.peek().is_some() {
+            let mut page = fumen.add_page();
+            if empty_fields == 0 {
+                // decode field spec
+                let mut delta = [[0; 10]; 24];
+                let mut x = 0;
+                let mut y = 0;
+                while y != 24 {
+                    let number = iter.next()?? + 64 * iter.next()??;
+                    let value = number / 240;
+                    let repeats = number % 240 + 1;
+                    for _ in 0..repeats {
+                        if y == 24 {
+                            return None;
+                        }
+                        delta[y][x] = value;
+                        x += 1;
+                        if x == 10 {
+                            y += 1;
+                            x = 0;
+                        }
+                    }
+                }
+                if delta == [[8; 10]; 24] {
+                    empty_fields = iter.next()??;
+                }
+                for y in 0..23 {
+                    for x in 0..10 {
+                        let value = delta[y][x] + page.field[22-y][x] as usize - 8;
+                        page.field[22-y][x] = decode_cell_color(value)?;
+                    }
+                }
+                for x in 0..10 {
+                    let value = delta[23][x] + page.garbage_row[x] as usize - 8;
+                    page.garbage_row[x] = decode_cell_color(value)?;
+                }
+            } else {
+                empty_fields -= 1;
+            }
+
+            // decode page data
+            let number = iter.next()?? + iter.next()?? * 64 + iter.next()?? * 64*64;
+            let piece_type = number % 8;
+            let piece_rot = number / 8 % 4;
+            let piece_pos = number / 32 % 240;
+
+            page.piece = if piece_type == 0 { None } else {
+                let kind = match piece_type {
+                    1 => PieceType::I,
+                    2 => PieceType::L,
+                    3 => PieceType::O,
+                    4 => PieceType::Z,
+                    5 => PieceType::T,
+                    6 => PieceType::J,
+                    7 => PieceType::S,
+                    _ => unreachable!()
+                };
+                let rotation = match piece_rot {
+                    0 => RotationState::South,
+                    1 => RotationState::East,
+                    2 => RotationState::North,
+                    3 => RotationState::West,
+                    _ => unreachable!()
+                };
+                let x = piece_pos as u32 % 10;
+                let y = 22 - piece_pos as u32 / 10;
+                Some(Piece {
+                    kind, rotation,
+                    // we need to convert fumen centers to SRS true rotation centers
+                    x: match (kind, rotation) {
+                        (PieceType::S, RotationState::East) => x - 1,
+                        (PieceType::Z, RotationState::West) => x + 1,
+                        (PieceType::O, RotationState::West) => x + 1,
+                        (PieceType::O, RotationState::South) => x + 1,
+                        (PieceType::I, RotationState::South) => x + 1,
+                        _ => x
+                    },
+                    y: match (kind, rotation) {
+                        (PieceType::S, RotationState::North) => y - 1,
+                        (PieceType::Z, RotationState::North) => y - 1,
+                        (PieceType::O, RotationState::North) => y - 1,
+                        (PieceType::O, RotationState::West) => y - 1,
+                        (PieceType::I, RotationState::West) => y - 1,
+                        _ => y
+                    }
+                })
+            };
+
+            let flags = dbg!(number) / 32 / 240;
+            page.rise = flags & 0b1 != 0;
+            page.mirror = flags & 0b10 != 0;
+            let guideline = flags & 0b100 != 0;
+            let comment = flags & 0b1000 != 0;
+            page.lock = flags & 0b10000 == 0;
+
+            if comment {
+                let mut length = iter.next()?? + iter.next()?? * 64;
+                let mut escaped = String::new();
+                while length > 0 {
+                    let mut number = iter.next()?? + iter.next()?? * 64 + iter.next()?? * 64 * 64
+                        + iter.next()?? * 64 * 64 * 64 + iter.next()?? * 64 * 64 * 64 * 64;
+                    for _ in 0..length.min(4) {
+                        escaped.push(std::char::from_u32(number as u32 % 96 + 0x20)?);
+                        length -= 1;
+                        number /= 96;
+                    }
+                }
+                page.comment = Some(js_unescape(&escaped));
+            }
+
+            if fumen.pages.len() == 1 {
+                fumen.guideline = guideline;
+            }
+        }
+        Some(fumen)
     }
 
     pub fn add_page(&mut self) -> &mut Page {
@@ -185,6 +305,32 @@ fn fumen_field_delta(
         }
     }
     deltas
+}
+
+fn decode_cell_color(value: usize) -> Option<CellColor> {
+    Some(match value {
+        0 => CellColor::Empty,
+        1 => CellColor::I,
+        2 => CellColor::L,
+        3 => CellColor::O,
+        4 => CellColor::Z,
+        5 => CellColor::T,
+        6 => CellColor::J,
+        7 => CellColor::S,
+        8 => CellColor::Grey,
+        _ => return None
+    })
+}
+
+fn from_base64(c: char) -> Option<usize> {
+    Some(match c {
+        'A' ..= 'Z' => c as usize - 'A' as usize,
+        'a' ..= 'z' => c as usize - 'a' as usize + 26,
+        '0' ..= '9' => c as usize - '0' as usize + 52,
+        '+' => 62,
+        '/' => 63,
+        _ => return None
+    })
 }
 
 impl Page {
@@ -400,6 +546,37 @@ fn js_escape(s: &str) -> Vec<u8> {
     result
 }
 
+fn js_unescape(s: &str) -> String {
+    fn decode(mut i: impl Iterator<Item=char>, c: usize) -> u16 {
+        let mut number = 0;
+        for _ in 0..c {
+            if let Some(c) = i.next() {
+                if let Some(v) = c.to_digit(16) {
+                    number *= 16;
+                    number += v as u16;
+                }
+            }
+        }
+        number
+    }
+
+    let mut iter = s.chars().peekable();
+    let mut result_utf16 = vec![];
+    while let Some(c) = iter.next() {
+        match c {
+            '%' => match iter.peek() {
+                Some('u') => {
+                    iter.next();
+                    result_utf16.push(decode(&mut iter, 4));
+                }
+                _ => result_utf16.push(decode(&mut iter, 2))
+            }
+            _ => result_utf16.push(c as u16)
+        }
+    }
+    String::from_utf16_lossy(&result_utf16)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::*;
@@ -408,7 +585,7 @@ mod tests {
     fn empty() {
         let fumen = Fumen::default();
         assert_eq!(fumen.encode(), "v115@");
-        // assert_eq!(Fumen::decode("v115@"), Some(fumen));
+        assert_eq!(Fumen::decode("v115@"), Some(fumen));
     }
 
     #[test]
@@ -421,7 +598,7 @@ mod tests {
             y: 0
         });
         assert_eq!(fumen.encode(), "v115@vhAVPJ");
-        // assert_eq!(Fumen::decode("v115@vhAVPJ"), Some(fumen));
+        assert_eq!(Fumen::decode("v115@vhAVPJ"), Some(fumen));
     }
 
     #[test]
@@ -435,7 +612,7 @@ mod tests {
         });
         fumen.pages.push(Page::default());
         assert_eq!(fumen.encode(), "v115@vhAVPJThQLHeSLPeAAA");
-        // assert_eq!(Fumen::decode("v115@vhAVPJThQLHeSLPeAAA"), Some(fumen));
+        assert_eq!(Fumen::decode("v115@vhAVPJThQLHeSLPeAAA"), Some(fumen));
     }
 
     #[test]
@@ -470,9 +647,9 @@ mod tests {
             fumen.encode(),
             "v115@OgA8ceA8ceA8jezKJvhC7bBjMBr9A6fxSHexSHeAAIexSHexSHeAAIexSHexSHeAAIexSHexSOeAAA"
         );
-        // assert_eq!(Fumen::decode(
-        //     "v115@OgA8ceA8ceA8jezKJvhC7bBjMBr9A6fxSHexSHeAAIexSHexSHeAAIexSHexSHeAAIexSHexSOeAAA"
-        // ), Some(fumen));
+        assert_eq!(Fumen::decode(
+            "v115@OgA8ceA8ceA8jezKJvhC7bBjMBr9A6fxSHexSHeAAIexSHexSHeAAIexSHexSHeAAIexSHexSOeAAA"
+        ), Some(fumen));
     }
 
     #[test]
@@ -503,7 +680,7 @@ mod tests {
         let mut fumen = Fumen::default();
         fumen.add_page().field[22][0] = CellColor::Grey;
         assert_eq!(fumen.encode(), "v115@A8uhAgH");
-        // assert_eq!(Fumen::decode("v115@A8uhAgH"), Some(fumen));
+        assert_eq!(Fumen::decode("v115@A8uhAgH"), Some(fumen));
     }
 
     #[test]
@@ -523,10 +700,10 @@ mod tests {
         page.field[3][2] = CellColor::Empty;
         page.field[3][6] = CellColor::J;
         assert_eq!(fumen.encode(), "v115@9gxhAeyhg0yhBtQpCtAeCtQ4AeW4glD8AeB8wwB8JeAgH");
-        // assert_eq!(
-        //     Fumen::decode("v115@9gxhAeyhg0yhBtQpCtAeCtQ4AeW4glD8AeB8wwB8JeAgH"),
-        //     Some(fumen)
-        // );
+        assert_eq!(
+            Fumen::decode("v115@9gxhAeyhg0yhBtQpCtAeCtQ4AeW4glD8AeB8wwB8JeAgH"),
+            Some(fumen)
+        );
     }
 
     #[test]
@@ -535,7 +712,7 @@ mod tests {
         fumen.add_page().field[0] = [CellColor::Grey; 10];
         fumen.add_page();
         assert_eq!(fumen.encode(), "v115@bhJ8JeAgHvhAAAA");
-        // assert_eq!(Fumen::decode("v115@bhJ8JeAgHvhAAAA"), Some(fumen));
+        assert_eq!(Fumen::decode("v115@bhJ8JeAgHvhAAAA"), Some(fumen));
     }
 
     #[test]
@@ -548,7 +725,7 @@ mod tests {
         fumen.add_page();
         fumen.pages.push(Page::default());
         assert_eq!(fumen.encode(), "v115@chwhLeA8EeAYJvhAAAAShQaLeAAOeAAA");
-        // assert_eq!(Fumen::decode("v115@chwhLeA8EeAYJvhAAAAShQaLeAAOeAAA"), Some(fumen));
+        assert_eq!(Fumen::decode("v115@chwhLeA8EeAYJvhAAAAShQaLeAAOeAAA"), Some(fumen));
     }
 
     #[test]
@@ -563,10 +740,10 @@ mod tests {
         fumen.add_page();
         fumen.pages.push(Page::default());
         assert_eq!(fumen.encode(), "v115@bhwhglQpAtwwg0Q4A8LeAQLvhAAAAdhAAwDgHQLAPwSgWQaJeAAA");
-        // assert_eq!(
-        //     Fumen::decode("v115@bhwhglQpAtwwg0Q4A8LeAQLvhAAAAdhAAwDgHQLAPwSgWQaJeAAA"),
-        //     Some(fumen)
-        // );
+        assert_eq!(
+            Fumen::decode("v115@bhwhglQpAtwwg0Q4A8LeAQLvhAAAAdhAAwDgHQLAPwSgWQaJeAAA"),
+            Some(fumen)
+        );
     }
 
     #[test]
@@ -574,7 +751,7 @@ mod tests {
         let mut fumen = Fumen::default();
         fumen.add_page().comment = Some("Hello World!".to_owned());
         assert_eq!(fumen.encode(), "v115@vhAAgWQAIoMDEvoo2AXXaDEkoA6A");
-        // assert_eq!(Fumen::decode("v115@vhAAgWQAIoMDEvoo2AXXaDEkoA6A"), Some(fumen));
+        assert_eq!(Fumen::decode("v115@vhAAgWQAIoMDEvoo2AXXaDEkoA6A"), Some(fumen));
     }
 
     #[test]
@@ -584,9 +761,9 @@ mod tests {
         assert_eq!(
             fumen.encode(), "v115@vhAAgWqAlvs2A1sDfEToABBlvs2AWDEfET4J6Alvs2AWJEfE0H3KBlvtHB00AAA"
         );
-        // assert_eq!(Fumen::decode(
-        //    "v115@vhAAgWqAlvs2A1sDfEToABBlvs2AWDEfET4J6Alvs2AWJEfE0H3KBlvtHB00AAA"
-        // ), Some(fumen));
+        assert_eq!(Fumen::decode(
+           "v115@vhAAgWqAlvs2A1sDfEToABBlvs2AWDEfET4J6Alvs2AWJEfE0H3KBlvtHB00AAA"
+        ), Some(fumen));
     }
 
     #[test]
@@ -597,8 +774,8 @@ mod tests {
             fumen.encode(),
             "v115@vhAAgWwAl/SSBzEEfEEFj6Al/SSBzEEfEkGpzBl/SSBzEEfEkpv6Bl/SSBTGEfEEojHB"
         );
-        // assert_eq!(Fumen::decode(
-        //    "v115@vhAAgWwAl/SSBzEEfEEFj6Al/SSBzEEfEkGpzBl/SSBzEEfEkpv6Bl/SSBTGEfEEojHB"
-        // ), Some(fumen));
+        assert_eq!(Fumen::decode(
+           "v115@vhAAgWwAl/SSBzEEfEEFj6Al/SSBzEEfEkGpzBl/SSBzEEfEkpv6Bl/SSBTGEfEEojHB"
+        ), Some(fumen));
     }
 }
