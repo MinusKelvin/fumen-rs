@@ -71,6 +71,8 @@ const BASE64_CHARS: [u8; 64] = [
 
 impl Fumen {
     pub fn encode(&self) -> String {
+        // we need a vec and not a string here since we need to go back and patch in the
+        // length of empty field sequences... and i don't want to do 2-pass encoding
         let mut data = b"v115@".to_vec();
         let mut prev_field = [[CellColor::Empty; 10]; 24];
         let mut empty_field = None;
@@ -128,6 +130,25 @@ impl Fumen {
             data.push(BASE64_CHARS[page_flags & 0x3F]);
             data.push(BASE64_CHARS[page_flags >> 6 & 0x3F]);
             data.push(BASE64_CHARS[page_flags >> 12 & 0x3F]);
+
+            if let Some(ref comment) = page.comment {
+                let mut encoded = js_escape(comment);
+                encoded.truncate(4095);
+                data.push(BASE64_CHARS[encoded.len() & 0x3F]);
+                data.push(BASE64_CHARS[encoded.len() >> 6 & 0x3F]);
+
+                for c in encoded.chunks(4) {
+                    let mut v = 0;
+                    for &c in c.iter().rev() {
+                        v *= 96;
+                        v += c as usize - 0x20;
+                    }
+                    for _ in 0..5 {
+                        data.push(BASE64_CHARS[v & 0x3F]);
+                        v >>= 6;
+                    }
+                }
+            }
 
             // this handles piece locking, line clear, mirror, and rise rules
             prev_field = page.next_page().fumen_field();
@@ -345,6 +366,37 @@ impl From<PieceType> for CellColor {
     }
 }
 
+fn js_escape(s: &str) -> Vec<u8> {
+    const HEX_DIGITS: [u8; 16] = [
+        b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7',
+        b'8', b'9', b'A', b'B', b'C', b'D', b'E', b'F'
+    ];
+
+    let mut result = Vec::new();
+    for c in s.chars() {
+        match c {
+            'a' ..= 'z' | 'A' ..= 'Z' | '0' ..= '9' |
+            '@' | '*' | '_' | '+' | '-' | '.' | '/' => result.push(c as u8),
+            '\u{0}' ..= '\u{FF}' => {
+                result.push(b'%');
+                result.push(HEX_DIGITS[(c as usize) >> 4 & 0xF]);
+                result.push(HEX_DIGITS[(c as usize) >> 0 & 0xF]);
+            }
+            _ => {
+                let mut buf = [0; 2];
+                for &mut c in c.encode_utf16(&mut buf) {
+                    result.extend_from_slice(b"%u");
+                    result.push(HEX_DIGITS[(c as usize) >> 12 & 0xF]);
+                    result.push(HEX_DIGITS[(c as usize) >> 8 & 0xF]);
+                    result.push(HEX_DIGITS[(c as usize) >> 4 & 0xF]);
+                    result.push(HEX_DIGITS[(c as usize) >> 0 & 0xF]);
+                }
+            }
+        }
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use crate::*;
@@ -508,5 +560,38 @@ mod tests {
         //     Fumen::decode("v115@bhwhglQpAtwwg0Q4A8LeAQLvhAAAAdhAAwDgHQLAPwSgWQaJeAAA"),
         //     Some(fumen)
         // );
+    }
+
+    #[test]
+    fn comment() {
+        let mut fumen = Fumen::default();
+        fumen.pages[0].comment = Some("Hello World!".to_owned());
+        assert_eq!(fumen.encode(), "v115@vhAAgWQAIoMDEvoo2AXXaDEkoA6A");
+        // assert_eq!(Fumen::decode("v115@vhAAgWQAIoMDEvoo2AXXaDEkoA6A"), Some(fumen));
+    }
+
+    #[test]
+    fn comment_unicode() {
+        let mut fumen = Fumen::default();
+        fumen.pages[0].comment = Some("こんにちは世界".to_owned());
+        assert_eq!(
+            fumen.encode(), "v115@vhAAgWqAlvs2A1sDfEToABBlvs2AWDEfET4J6Alvs2AWJEfE0H3KBlvtHB00AAA"
+        );
+        // assert_eq!(Fumen::decode(
+        //    "v115@vhAAgWqAlvs2A1sDfEToABBlvs2AWDEfET4J6Alvs2AWJEfE0H3KBlvtHB00AAA"
+        // ), Some(fumen));
+    }
+
+    #[test]
+    fn comment_surrogate_pair() {
+        let mut fumen = Fumen::default();
+        fumen.pages[0].comment = Some("🂡🆛🏍😵".to_owned());
+        assert_eq!(
+            fumen.encode(),
+            "v115@vhAAgWwAl/SSBzEEfEEFj6Al/SSBzEEfEkGpzBl/SSBzEEfEkpv6Bl/SSBTGEfEEojHB"
+        );
+        // assert_eq!(Fumen::decode(
+        //    "v115@vhAAgWwAl/SSBzEEfEEFj6Al/SSBzEEfEkGpzBl/SSBzEEfEkpv6Bl/SSBTGEfEEojHB"
+        // ), Some(fumen));
     }
 }
