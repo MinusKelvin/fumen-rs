@@ -167,7 +167,10 @@ impl Fumen {
     }
 
     pub fn add_page(&mut self) -> &mut Page {
-        self.pages.push(self.pages.last().unwrap().next_page());
+        self.pages.push(match self.pages.last() {
+            Some(p) => p.next_page(),
+            None => Page::default()
+        });
         self.pages.last_mut().unwrap()
     }
 }
@@ -332,7 +335,7 @@ impl Piece {
 impl Default for Fumen {
     fn default() -> Self {
         Fumen {
-            pages: vec![Page::default()],
+            pages: vec![],
             guideline: true
         }
     }
@@ -404,14 +407,14 @@ mod tests {
     #[test]
     fn empty() {
         let fumen = Fumen::default();
-        assert_eq!(fumen.encode(), "v115@vhAAgH");
-        // assert_eq!(Fumen::decode("v115@vhAAgH"), Some(fumen));
+        assert_eq!(fumen.encode(), "v115@");
+        // assert_eq!(Fumen::decode("v115@"), Some(fumen));
     }
 
     #[test]
     fn one_page_lock_piece() {
         let mut fumen = Fumen::default();
-        fumen.pages[0].piece = Some(Piece {
+        fumen.add_page().piece = Some(Piece {
             kind: PieceType::T,
             rotation: RotationState::North,
             x: 2,
@@ -424,7 +427,7 @@ mod tests {
     #[test]
     fn lock_piece() {
         let mut fumen = Fumen::default();
-        fumen.pages[0].piece = Some(Piece {
+        fumen.add_page().piece = Some(Piece {
             kind: PieceType::T,
             rotation: RotationState::North,
             x: 2,
@@ -438,10 +441,11 @@ mod tests {
     #[test]
     fn o_piece_wobble() {
         let mut fumen = Fumen::default();
-        fumen.pages[0].field[2][3] = CellColor::Grey;
-        fumen.pages[0].field[5][3] = CellColor::Grey;
-        fumen.pages[0].field[8][3] = CellColor::Grey;
-        fumen.pages[0].piece = Some(Piece {
+        let page = fumen.add_page();
+        page.field[2][3] = CellColor::Grey;
+        page.field[5][3] = CellColor::Grey;
+        page.field[8][3] = CellColor::Grey;
+        page.piece = Some(Piece {
             kind: PieceType::O,
             rotation: RotationState::North,
             x: 3, y: 0
@@ -497,7 +501,7 @@ mod tests {
     #[test]
     fn simple_field() {
         let mut fumen = Fumen::default();
-        fumen.pages[0].field[22][0] = CellColor::Grey;
+        fumen.add_page().field[22][0] = CellColor::Grey;
         assert_eq!(fumen.encode(), "v115@A8uhAgH");
         // assert_eq!(Fumen::decode("v115@A8uhAgH"), Some(fumen));
     }
@@ -505,18 +509,19 @@ mod tests {
     #[test]
     fn arbitrary_field() {
         let mut fumen = Fumen::default();
-        fumen.pages[0].field[0] = [CellColor::Grey; 10];
-        fumen.pages[0].field[0][4] = CellColor::Empty;
-        fumen.pages[0].field[0][7] = CellColor::T;
-        fumen.pages[0].field[1] = [CellColor::S; 10];
-        fumen.pages[0].field[1][1] = CellColor::Empty;
-        fumen.pages[0].field[1][9] = CellColor::L;
-        fumen.pages[0].field[2] = [CellColor::Z; 10];
-        fumen.pages[0].field[2][6] = CellColor::Empty;
-        fumen.pages[0].field[2][2] = CellColor::O;
-        fumen.pages[0].field[3] = [CellColor::I; 10];
-        fumen.pages[0].field[3][2] = CellColor::Empty;
-        fumen.pages[0].field[3][6] = CellColor::J;
+        let page = fumen.add_page();
+        page.field[0] = [CellColor::Grey; 10];
+        page.field[0][4] = CellColor::Empty;
+        page.field[0][7] = CellColor::T;
+        page.field[1] = [CellColor::S; 10];
+        page.field[1][1] = CellColor::Empty;
+        page.field[1][9] = CellColor::L;
+        page.field[2] = [CellColor::Z; 10];
+        page.field[2][6] = CellColor::Empty;
+        page.field[2][2] = CellColor::O;
+        page.field[3] = [CellColor::I; 10];
+        page.field[3][2] = CellColor::Empty;
+        page.field[3][6] = CellColor::J;
         assert_eq!(fumen.encode(), "v115@9gxhAeyhg0yhBtQpCtAeCtQ4AeW4glD8AeB8wwB8JeAgH");
         // assert_eq!(
         //     Fumen::decode("v115@9gxhAeyhg0yhBtQpCtAeCtQ4AeW4glD8AeB8wwB8JeAgH"),
@@ -527,7 +532,7 @@ mod tests {
     #[test]
     fn line_clear() {
         let mut fumen = Fumen::default();
-        fumen.pages[0].field[0] = [CellColor::Grey; 10];
+        fumen.add_page().field[0] = [CellColor::Grey; 10];
         fumen.add_page();
         assert_eq!(fumen.encode(), "v115@bhJ8JeAgHvhAAAA");
         // assert_eq!(Fumen::decode("v115@bhJ8JeAgHvhAAAA"), Some(fumen));
@@ -536,9 +541,10 @@ mod tests {
     #[test]
     fn rise() {
         let mut fumen = Fumen::default();
-        fumen.pages[0].field[0][1] = CellColor::I;
-        fumen.pages[0].garbage_row[4] = CellColor::Grey;
-        fumen.pages[0].rise = true;
+        let page = fumen.add_page();
+        page.field[0][1] = CellColor::I;
+        page.garbage_row[4] = CellColor::Grey;
+        page.rise = true;
         fumen.add_page();
         fumen.pages.push(Page::default());
         assert_eq!(fumen.encode(), "v115@chwhLeA8EeAYJvhAAAAShQaLeAAOeAAA");
@@ -548,11 +554,12 @@ mod tests {
     #[test]
     fn mirror() {
         let mut fumen = Fumen::default();
-        fumen.pages[0].field[0] = [
+        let page = fumen.add_page();
+        page.field[0] = [
             CellColor::I, CellColor::L, CellColor::O, CellColor::Z, CellColor::T,
             CellColor::J, CellColor::S, CellColor::Grey, CellColor::Empty, CellColor::Empty
         ];
-        fumen.pages[0].mirror = true;
+        page.mirror = true;
         fumen.add_page();
         fumen.pages.push(Page::default());
         assert_eq!(fumen.encode(), "v115@bhwhglQpAtwwg0Q4A8LeAQLvhAAAAdhAAwDgHQLAPwSgWQaJeAAA");
@@ -565,7 +572,7 @@ mod tests {
     #[test]
     fn comment() {
         let mut fumen = Fumen::default();
-        fumen.pages[0].comment = Some("Hello World!".to_owned());
+        fumen.add_page().comment = Some("Hello World!".to_owned());
         assert_eq!(fumen.encode(), "v115@vhAAgWQAIoMDEvoo2AXXaDEkoA6A");
         // assert_eq!(Fumen::decode("v115@vhAAgWQAIoMDEvoo2AXXaDEkoA6A"), Some(fumen));
     }
@@ -573,7 +580,7 @@ mod tests {
     #[test]
     fn comment_unicode() {
         let mut fumen = Fumen::default();
-        fumen.pages[0].comment = Some("こんにちは世界".to_owned());
+        fumen.add_page().comment = Some("こんにちは世界".to_owned());
         assert_eq!(
             fumen.encode(), "v115@vhAAgWqAlvs2A1sDfEToABBlvs2AWDEfET4J6Alvs2AWJEfE0H3KBlvtHB00AAA"
         );
@@ -585,7 +592,7 @@ mod tests {
     #[test]
     fn comment_surrogate_pair() {
         let mut fumen = Fumen::default();
-        fumen.pages[0].comment = Some("🂡🆛🏍😵".to_owned());
+        fumen.add_page().comment = Some("🂡🆛🏍😵".to_owned());
         assert_eq!(
             fumen.encode(),
             "v115@vhAAgWwAl/SSBzEEfEEFj6Al/SSBzEEfEkGpzBl/SSBzEEfEkpv6Bl/SSBTGEfEEojHB"
