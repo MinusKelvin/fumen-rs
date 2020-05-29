@@ -501,6 +501,30 @@ impl Default for Page {
     }
 }
 
+#[cfg(feature = "serde")]
+impl serde::Serialize for Fumen {
+    fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        ser.serialize_str(&self.encode())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for Fumen {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Fumen;
+            fn expecting(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(fmt, "an encoded fumen string")
+            }
+            fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<Fumen, E> {
+                Fumen::decode(s).ok_or_else(|| E::custom("Invalid fumen string"))
+            }
+        }
+        de.deserialize_str(Visitor)
+    }
+}
+
 impl From<PieceType> for CellColor {
     fn from(v: PieceType) -> CellColor {
         match v {
