@@ -166,7 +166,7 @@ impl Fumen {
         if &data[..5] != "v115@" {
             return None;
         }
-        let mut iter = data[5..].chars().map(from_base64).peekable();
+        let mut iter = data[5..].chars().filter(|&c| c != '?').map(from_base64).peekable();
         let mut fumen = Fumen::default();
         let mut empty_fields = 0;
         while iter.peek().is_some() {
@@ -257,7 +257,7 @@ impl Fumen {
                 })
             };
 
-            let flags = dbg!(number) / 32 / 240;
+            let flags = number / 32 / 240;
             page.rise = flags & 0b1 != 0;
             page.mirror = flags & 0b10 != 0;
             let guideline = flags & 0b100 != 0;
