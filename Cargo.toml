@@ -3,6 +3,10 @@ name = "fumen"
 version = "0.1.0"
 authors = ["MinusKelvin <mark.carlson@minuskelvin.net>"]
 edition = "2018"
+license = "MIT"
+description = "Encode and decode fumens from http://fumen.zui.jp"
+repository = "https://github.com/MinusKelvin/fumen-rs"
+keywords = ["tetris"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

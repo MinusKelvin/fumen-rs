@@ -36,10 +36,11 @@ pub enum RotationState {
     West = 3
 }
 
+
+/// Represents a tetromino piece using true rotation.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Piece {
     pub kind: PieceType,
-    /// SRS true rotation
     pub rotation: RotationState,
     pub x: u32,
     /// y-up
@@ -70,6 +71,7 @@ const BASE64_CHARS: [u8; 64] = [
 ];
 
 impl Fumen {
+    /// Encode as a fumen data string.
     pub fn encode(&self) -> String {
         // we need a vec and not a string here since we need to go back and patch in the
         // length of empty field sequences... and i don't want to do 2-pass encoding
@@ -162,7 +164,12 @@ impl Fumen {
         String::from_utf8(data).unwrap()
     }
 
-    pub fn decode(data: &str) -> Option<Fumen> {
+    /// Decodes a fumen data string.
+    pub fn decode(data: &str) -> Result<Fumen, DecodeFumenError> {
+        Fumen::decode_opt(data).ok_or(DecodeFumenError)
+    }
+
+    fn decode_opt(data: &str) -> Option<Fumen> {
         if &data[..5] != "v115@" {
             return None;
         }
@@ -286,6 +293,9 @@ impl Fumen {
         Some(fumen)
     }
 
+    /// Create a new page, in the same way as creating a new page in fumen does.
+    ///
+    /// This will apply the piece locking, line clear, rise, and mirror rules just like fumen does.
     pub fn add_page(&mut self) -> &mut Page {
         self.pages.push(match self.pages.last() {
             Some(p) => p.next_page(),
@@ -352,6 +362,9 @@ impl Page {
         field
     }
 
+    /// Create a page from this page in the same way as fumen does.
+    ///
+    /// This will apply the piece locking, line clear, rise, and mirror rules just like fumen does.
     pub fn next_page(&self) -> Page {
         let mut field = self.field;
 
@@ -518,7 +531,7 @@ impl<'de> serde::Deserialize<'de> for Fumen {
                 write!(fmt, "an encoded fumen string")
             }
             fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<Fumen, E> {
-                Fumen::decode(s).ok_or_else(|| E::custom("Invalid fumen string"))
+                Fumen::decode(s).map_err(E::custom)
             }
         }
         de.deserialize_str(Visitor)
@@ -601,6 +614,17 @@ fn js_unescape(s: &str) -> String {
     String::from_utf16_lossy(&result_utf16)
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct DecodeFumenError;
+
+impl std::fmt::Display for DecodeFumenError {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(fmt, "the string does not contain valid fumen data")
+    }
+}
+
+impl std::error::Error for DecodeFumenError {}
+
 #[cfg(test)]
 mod tests {
     use crate::*;
@@ -609,7 +633,7 @@ mod tests {
     fn empty() {
         let fumen = Fumen::default();
         assert_eq!(fumen.encode(), "v115@");
-        assert_eq!(Fumen::decode("v115@"), Some(fumen));
+        assert_eq!(Fumen::decode("v115@"), Ok(fumen));
     }
 
     #[test]
@@ -622,7 +646,7 @@ mod tests {
             y: 0
         });
         assert_eq!(fumen.encode(), "v115@vhAVPJ");
-        assert_eq!(Fumen::decode("v115@vhAVPJ"), Some(fumen));
+        assert_eq!(Fumen::decode("v115@vhAVPJ"), Ok(fumen));
     }
 
     #[test]
@@ -636,7 +660,7 @@ mod tests {
         });
         fumen.pages.push(Page::default());
         assert_eq!(fumen.encode(), "v115@vhAVPJThQLHeSLPeAAA");
-        assert_eq!(Fumen::decode("v115@vhAVPJThQLHeSLPeAAA"), Some(fumen));
+        assert_eq!(Fumen::decode("v115@vhAVPJThQLHeSLPeAAA"), Ok(fumen));
     }
 
     #[test]
@@ -673,7 +697,7 @@ mod tests {
         );
         assert_eq!(Fumen::decode(
             "v115@OgA8ceA8ceA8jezKJvhC7bBjMBr9A6fxSHexSHeAAIexSHexSHeAAIexSHexSHeAAIexSHexSOeAAA"
-        ), Some(fumen));
+        ), Ok(fumen));
     }
 
     #[test]
@@ -704,7 +728,7 @@ mod tests {
         let mut fumen = Fumen::default();
         fumen.add_page().field[22][0] = CellColor::Grey;
         assert_eq!(fumen.encode(), "v115@A8uhAgH");
-        assert_eq!(Fumen::decode("v115@A8uhAgH"), Some(fumen));
+        assert_eq!(Fumen::decode("v115@A8uhAgH"), Ok(fumen));
     }
 
     #[test]
@@ -726,7 +750,7 @@ mod tests {
         assert_eq!(fumen.encode(), "v115@9gxhAeyhg0yhBtQpCtAeCtQ4AeW4glD8AeB8wwB8JeAgH");
         assert_eq!(
             Fumen::decode("v115@9gxhAeyhg0yhBtQpCtAeCtQ4AeW4glD8AeB8wwB8JeAgH"),
-            Some(fumen)
+            Ok(fumen)
         );
     }
 
@@ -736,7 +760,7 @@ mod tests {
         fumen.add_page().field[0] = [CellColor::Grey; 10];
         fumen.add_page();
         assert_eq!(fumen.encode(), "v115@bhJ8JeAgHvhAAAA");
-        assert_eq!(Fumen::decode("v115@bhJ8JeAgHvhAAAA"), Some(fumen));
+        assert_eq!(Fumen::decode("v115@bhJ8JeAgHvhAAAA"), Ok(fumen));
     }
 
     #[test]
@@ -749,7 +773,7 @@ mod tests {
         fumen.add_page();
         fumen.pages.push(Page::default());
         assert_eq!(fumen.encode(), "v115@chwhLeA8EeAYJvhAAAAShQaLeAAOeAAA");
-        assert_eq!(Fumen::decode("v115@chwhLeA8EeAYJvhAAAAShQaLeAAOeAAA"), Some(fumen));
+        assert_eq!(Fumen::decode("v115@chwhLeA8EeAYJvhAAAAShQaLeAAOeAAA"), Ok(fumen));
     }
 
     #[test]
@@ -766,7 +790,7 @@ mod tests {
         assert_eq!(fumen.encode(), "v115@bhwhglQpAtwwg0Q4A8LeAQLvhAAAAdhAAwDgHQLAPwSgWQaJeAAA");
         assert_eq!(
             Fumen::decode("v115@bhwhglQpAtwwg0Q4A8LeAQLvhAAAAdhAAwDgHQLAPwSgWQaJeAAA"),
-            Some(fumen)
+            Ok(fumen)
         );
     }
 
@@ -775,7 +799,7 @@ mod tests {
         let mut fumen = Fumen::default();
         fumen.add_page().comment = Some("Hello World!".to_owned());
         assert_eq!(fumen.encode(), "v115@vhAAgWQAIoMDEvoo2AXXaDEkoA6A");
-        assert_eq!(Fumen::decode("v115@vhAAgWQAIoMDEvoo2AXXaDEkoA6A"), Some(fumen));
+        assert_eq!(Fumen::decode("v115@vhAAgWQAIoMDEvoo2AXXaDEkoA6A"), Ok(fumen));
     }
 
     #[test]
@@ -787,7 +811,7 @@ mod tests {
         );
         assert_eq!(Fumen::decode(
            "v115@vhAAgWqAlvs2A1sDfEToABBlvs2AWDEfET4J6Alvs2AWJEfE0H3KBlvtHB00AAA"
-        ), Some(fumen));
+        ), Ok(fumen));
     }
 
     #[test]
@@ -800,6 +824,6 @@ mod tests {
         );
         assert_eq!(Fumen::decode(
            "v115@vhAAgWwAl/SSBzEEfEEFj6Al/SSBzEEfEkGpzBl/SSBzEEfEkpv6Bl/SSBTGEfEEojHB"
-        ), Some(fumen));
+        ), Ok(fumen));
     }
 }
