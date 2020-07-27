@@ -170,7 +170,7 @@ impl Fumen {
     }
 
     fn decode_opt(data: &str) -> Option<Fumen> {
-        if &data[..5] != "v115@" {
+        if data.chars().take(5).collect::<String>() != "v115@" {
             return None;
         }
         let mut iter = data[5..].chars().filter(|&c| c != '?').map(from_base64).peekable();
@@ -825,5 +825,12 @@ mod tests {
         assert_eq!(Fumen::decode(
            "v115@vhAAgWwAl/SSBzEEfEEFj6Al/SSBzEEfEkGpzBl/SSBzEEfEkpv6Bl/SSBTGEfEEojHB"
         ), Ok(fumen));
+    }
+
+    #[test]
+    fn not_a_fumen() {
+        assert_eq!(Fumen::decode(""), Err(DecodeFumenError));
+        assert_eq!(Fumen::decode("v115@hello world"), Err(DecodeFumenError));
+        assert_eq!(Fumen::decode("無効"), Err(DecodeFumenError));
     }
 }
