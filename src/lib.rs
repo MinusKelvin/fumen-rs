@@ -177,7 +177,7 @@ impl Fumen {
         let mut fumen = Fumen::default();
         let mut empty_fields = 0;
         while iter.peek().is_some() {
-            let mut page = fumen.add_page();
+            let page = fumen.add_page();
             if empty_fields == 0 {
                 // decode field spec
                 let mut delta = [[0; 10]; 24];
@@ -378,21 +378,23 @@ impl Page {
         }
 
         // do line clear rule
-        let mut y = 0;
-        for i in 0..23 {
-            let mut cleared = true;
-            for x in 0..10 {
-                if field[i][x] == CellColor::Empty {
-                    cleared = false;
+        if self.lock {
+            let mut y = 0;
+            for i in 0..23 {
+                let mut cleared = true;
+                for x in 0..10 {
+                    if field[i][x] == CellColor::Empty {
+                        cleared = false;
+                    }
+                }
+                if !cleared {
+                    field[y] = field[i];
+                    y += 1;
                 }
             }
-            if !cleared {
-                field[y] = field[i];
-                y += 1;
+            for i in y..23 {
+                field[i] = [CellColor::Empty; 10];
             }
-        }
-        for i in y..23 {
-            field[i] = [CellColor::Empty; 10];
         }
 
         // do "rise" rule
@@ -411,7 +413,7 @@ impl Page {
         }
 
         Page {
-            piece: None,
+            piece: if self.lock { None } else { self.piece },
             comment: None,
             rise: false,
             mirror: false,
@@ -832,5 +834,22 @@ mod tests {
         assert_eq!(Fumen::decode(""), Err(DecodeFumenError));
         assert_eq!(Fumen::decode("v115@hello world"), Err(DecodeFumenError));
         assert_eq!(Fumen::decode("無効"), Err(DecodeFumenError));
+    }
+
+    #[test]
+    fn no_piece_lock() {
+        let mut fumen = Fumen::default();
+        let page = fumen.add_page();
+        page.field[0] = [CellColor::Grey; 10];
+        page.lock = false;
+        page.piece = Some(Piece {
+            kind: PieceType::T,
+            rotation: RotationState::North,
+            x: 3,
+            y: 1
+        });
+        fumen.add_page();
+        assert_eq!(fumen.encode(), "v115@bhJ8Je1KnvhA1qf");
+        assert_eq!(Fumen::decode("v115@bhJ8Je1KnvhA1qf"), Ok(fumen));
     }
 }
