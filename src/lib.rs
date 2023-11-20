@@ -368,17 +368,15 @@ impl Page {
     pub fn next_page(&self) -> Page {
         let mut field = self.field;
 
-        // do piece placement
-        if let Some(piece) = self.piece {
-            if self.lock {
+        if self.lock {
+            // do piece placement
+            if let Some(piece) = self.piece {
                 for &(x, y) in &piece.cells() {
                     field[y as usize][x as usize] = piece.kind.into();
                 }
             }
-        }
 
-        // do line clear rule
-        if self.lock {
+            // do line clear rule
             let mut y = 0;
             for i in 0..23 {
                 let mut cleared = true;
